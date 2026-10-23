@@ -115,3 +115,8 @@ The maximum flight speed with elytra in Vanilla Minecraft is around 60 blocks/se
 When using Elytra Aeronautics with default settings, flight speed can reach 250 blocks/second when travelling parallel to the horizon, and 500 blocks/seconds when flying at a 45° angle. At horizontal speed it would take 1:27 minutes to travel that distance, and at maximum speed, it would just take 43 seconds to reach the mansion.
 
 Remember, this is using default settings, maximum flight speed can be increased or decreased.
+
+
+## Minecraft 26.2 port
+
+Port to Minecraft 26.2 (Fabric, Java 25, Mojang mappings) on the `26.2` branch. Flight part only so far; cloud layers and chunk unloading are not ported. Covered by 8 GameTests. Licence CC BY-NC-SA 4.0: non-commercial, share-alike, credit Soulphur0 and KIRILLAND78.

@@ -1,141 +1,109 @@
 package com.github.Soulphur0.behaviour;
 
-import com.github.Soulphur0.config.EanServerSettings;
-import com.github.Soulphur0.config.singletons.FlightConfig;
-import com.github.Soulphur0.networking.configSync.EanServerPayloadSender;
+import com.github.Soulphur0.config.FlightConfig;
 import com.github.Soulphur0.utility.EanMath;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
 
 public class EanFlightBehaviour {
+	/** The speed (blocks per second, roughly) the config asks for at this altitude. */
+	public static double speedAtAltitude(FlightConfig config, double altitude) {
+		double minSpeed = config.minSpeed;
+		double maxSpeed = config.maxSpeed;
+		if (!config.altitudeDeterminesSpeed) {
+			return minSpeed;
+		}
+		return Mth.clamp(EanMath.getLinealValue(config.minHeight, minSpeed, config.maxHeight, maxSpeed, altitude), minSpeed, maxSpeed);
+	}
 
-    // : Flight entry point for injection/modification.
-    static public Vec3d ean_flightBehaviour(LivingEntity player){
-        return ean_loadAndSyncFlightConfiguration(player);
-    }
+	/**
+	 * Called with the velocity vanilla worked out for this tick of gliding. Returns the replacement velocity, or the
+	 * vanilla one when altitude-based speed is off. Also eases the pitch back while sneaking, if configured.
+	 */
+	public static Vec3 flightBehaviour(LivingEntity player, Vec3 vanilla) {
+		FlightConfig config = FlightConfig.get();
 
-    // : Read FlightConfig from disk and sync it with the client.
-    private static Vec3d ean_loadAndSyncFlightConfiguration(LivingEntity player){
+		if (config.sneakingRealignsPitch && player.isShiftKeyDown()) {
+			float pitch = player.getXRot();
+			float alignmentAngle = config.realignAngle;
+			float alignmentRate = config.realignRate;
+			if (Math.abs(pitch) <= alignmentRate * 2) {
+				player.setXRot(alignmentAngle);
+			} else if (pitch > alignmentAngle) {
+				player.setXRot(pitch - alignmentRate);
+			} else {
+				player.setXRot(pitch + alignmentRate);
+			}
+		}
 
-        // . Order the client to sync settings with the server if the config has changed.
-        if (!player.getEntityWorld().isClient()) {
-            if (EanServerSettings.settingsChanged){
-                EanServerPayloadSender.syncAllClientsConfigWithServer((PlayerEntity) player);
-                EanServerSettings.settingsChanged = false;
-            }
-        }
+		if (!config.altitudeDeterminesSpeed) {
+			return vanilla;
+		}
 
-        // + Get config instance.
-        FlightConfig configInstance = FlightConfig.getOrCreateInstance();
+		double altitudeSpeed = speedAtAltitude(config, player.position().y);
+		Vec3 movement = calcFlightMovementVector(player, altitudeSpeed);
+		return movement.multiply(0.99F, 0.98F, 0.99F);
+	}
 
-        return ean_setupFlightCalc(player, configInstance);
-    }
+	private static Vec3 calcFlightMovementVector(LivingEntity player, double altitudeCalculatedSpeed) {
+		double fallSpeedConstant = 0.08;
 
-    // : Calculations.
-    private static Vec3d ean_setupFlightCalc(LivingEntity player, FlightConfig configInstance){
+		Vec3 movementVector = player.getDeltaMovement();
+		if (movementVector.y > -0.5) {
+			player.fallDistance = 1.0F;
+		}
 
-        // + Gradual pitch realignment
-        if(configInstance.isSneakingRealignsPitch() && player.isSneaking()){
-            float pitch = player.getPitch();
+		Vec3 rotationVector = player.getLookAngle();
+		float pitchInRadians = player.getXRot() * ((float) Math.PI / 180);
+		double angleToTheGround = Math.sqrt(rotationVector.x * rotationVector.x + rotationVector.z * rotationVector.z);
+		double speed = movementVector.horizontalDistance();
+		double rotationVectorLength = rotationVector.length();
 
-            float alignmentAngle = configInstance.getRealignAngle();
-            float alignementRate = configInstance.getRealignRate();
+		// the steeper the dive, the faster the fall
+		float fallSpeedMultiplier = Mth.cos(pitchInRadians);
+		fallSpeedMultiplier = (float) ((double) fallSpeedMultiplier * ((double) fallSpeedMultiplier * Math.min(1.0, rotationVectorLength / 0.4)));
 
-            if (Math.abs(pitch) <= alignementRate*2){
-                player.setPitch(alignmentAngle);
-            } else {
-                if (pitch > alignmentAngle){
-                    player.setPitch(pitch-alignementRate);
-                } else {
-                    player.setPitch(pitch+alignementRate);
-                }
-            }
-        }
+		// the player always loses some altitude
+		movementVector = player.getDeltaMovement().add(0.0, fallSpeedConstant * (-1.0 + (double) fallSpeedMultiplier * 0.75), 0.0);
 
-        // = Return null vector if altitude-determined speed is disabled
-        if (!configInstance.isAltitudeDeterminesSpeed())
-            return null;
+		// looking under the horizon: dive speed plus the configured speed (minus vanilla's)
+		if (movementVector.y < 0.0 && angleToTheGround > 0.0) {
+			double verticalSpeedValue = movementVector.y * -0.1 * (double) fallSpeedMultiplier;
+			double totalSpeed = altitudeCalculatedSpeed - 30.1298D;
+			double horizontalSpeedValue = verticalSpeedValue + totalSpeed * 0.0005584565076792029D;
+			movementVector = movementVector.add(rotationVector.x * horizontalSpeedValue / angleToTheGround, verticalSpeedValue, rotationVector.z * horizontalSpeedValue / angleToTheGround);
+		}
 
-        // + Get player altitude
-        Vec3d positionVector = player.getEntityPos();
-        double playerAltitude = positionVector.y;
+		// looking over the horizon: trade speed for height
+		if (pitchInRadians < 0.0F && angleToTheGround > 0.0) {
+			double verticalSpeedValue = speed * (double) (-Mth.sin(pitchInRadians)) * 0.04;
+			movementVector = movementVector.add(-rotationVector.x * verticalSpeedValue / angleToTheGround, Math.min(verticalSpeedValue * 3.2, 0.1D), -rotationVector.z * verticalSpeedValue / angleToTheGround);
+		}
 
-        // % Calculate player speed based on altitude and return
-        Vec3d movementVector = ean_calcFlightMovementVector(configInstance, player, playerAltitude);
+		if (angleToTheGround > 0.0) {
+			movementVector = movementVector.add((rotationVector.x / angleToTheGround * speed - movementVector.x) * 0.1, 0.0, (rotationVector.z / angleToTheGround * speed - movementVector.z) * 0.1);
+		}
 
-        return movementVector.multiply(0.99f, 0.98f, 0.99f);
-    }
+		return movementVector;
+	}
 
-    private static Vec3d ean_calcFlightMovementVector(FlightConfig configInstance, LivingEntity player, double playerAltitude){
-        double fallSpeedConstant = 0.08;
-        double verticalSpeedValue;
-        double horizontalSpeedValue;
+	/** The velocity a firework gives its glider; the vanilla one is passed through when altitude-based speed is off. */
+	public static Vec3 rocketBoost(LivingEntity shooter, Vec3 vanilla) {
+		FlightConfig config = FlightConfig.get();
+		if (!config.altitudeDeterminesSpeed || shooter == null) {
+			return vanilla;
+		}
+		Vec3 rotation = shooter.getLookAngle();
+		Vec3 velocity = shooter.getDeltaMovement();
+		double altitudeSpeed = speedAtAltitude(config, shooter.position().y);
 
-        // ? Read config file values
-        double minSpeed = configInstance.getMinSpeed();
-        double maxSpeed = configInstance.getMaxSpeed();
-        double curveStart = configInstance.getMinHeight();
-        double curveEnd = configInstance.getMaxHeight();
+		// fitted curve: which multiplier gives roughly this speed
+		double speedMultiplier = 0.0000006453840919839 * Math.pow(altitudeSpeed, 2) + 0.0508467 * altitudeSpeed - 0.202377;
 
-        // + Calculate additional speed based on player altitude.
-        // * Clamp the calculated modified speed to not be below or over the speed range.
-        double altitudeCalculatedSpeed = (configInstance.isAltitudeDeterminesSpeed()) ? MathHelper.clamp(EanMath.getLinealValue(curveStart,minSpeed,curveEnd,maxSpeed,playerAltitude), minSpeed, maxSpeed) : minSpeed;
-
-        Vec3d movementVector = player.getVelocity();
-        if (movementVector.y > -0.5) {
-            player.fallDistance = 1.0f;
-        }
-
-        Vec3d rotationVector = player.getRotationVector();
-        float pitchInRadians = player.getPitch() * ((float)Math.PI / 180);
-        double angleToTheGround = Math.sqrt(rotationVector.x * rotationVector.x + rotationVector.z * rotationVector.z);
-        double speed = movementVector.horizontalLength();
-        double rotationVectorLength = rotationVector.length();
-
-        // $ Vertical speed calculations
-
-        // + Calculate the fall speed multiplier based on the player's flight pitch.
-        float fallSpeedMultiplier = MathHelper.cos(pitchInRadians);
-        fallSpeedMultiplier = (float)((double)fallSpeedMultiplier * ((double)fallSpeedMultiplier * Math.min(1.0, rotationVectorLength / 0.4)));
-
-        // + Make the player always lose altitude.
-        // * A greater flight pitch and therefore fallSpeedMultiplier, lead to a greater downwards vertical velocity.
-        // % Set Y=0.0 to turn off downwards speed.
-        movementVector = player.getVelocity().add(0.0, fallSpeedConstant * (-1.0 + (double)fallSpeedMultiplier * 0.75), 0.0);
-
-        // $ Horizontal speed and movement vector calculations
-
-        // + Looking under the horizon
-        // * Horizontal movement uses verticalSpeedValue plus the (+1 m/s) constant multiplied by the speed set by the player (minus default speed).
-        if (movementVector.y < 0.0 && angleToTheGround > 0.0) {
-            verticalSpeedValue = movementVector.y * -0.1 * (double)fallSpeedMultiplier;
-
-            // ! Total Speed: The configured speed value minus the vanilla speed value.
-            // % The value 30.1298 should only be subtracted when downwards speed (fall speed) is active, since this speed affects the horizontal speed that it is already tweaked to almost perfectly reflect config file values.
-            double totalSpeed = (altitudeCalculatedSpeed-30.1298D);
-
-            // ? Horizontal speed value: vertical speed is added to the total speed multiplied by the 1 m/s constant.
-            // ¿ The 1 m/s constant is not 100% accurate, but it is close enough.
-            horizontalSpeedValue = verticalSpeedValue + totalSpeed*0.0005584565076792029D;
-
-            // % Set Y=0.0 to turn off downwards speed.
-            movementVector = movementVector.add(rotationVector.x * horizontalSpeedValue / angleToTheGround, verticalSpeedValue, rotationVector.z * horizontalSpeedValue / angleToTheGround);
-        }
-
-        // + Looking over the horizon
-        // * Vertical speed decreases with the player realtime speed.
-        if (pitchInRadians < 0.0f && angleToTheGround > 0.0) {
-            verticalSpeedValue = speed * (double)(-MathHelper.sin(pitchInRadians)) * 0.04;
-
-            movementVector = movementVector.add(-rotationVector.x * verticalSpeedValue / angleToTheGround, Math.min((verticalSpeedValue * 3.2), 0.1D), -rotationVector.z * verticalSpeedValue / angleToTheGround);
-        }
-
-        if (angleToTheGround > 0.0) {
-            movementVector = movementVector.add((rotationVector.x / angleToTheGround * speed - movementVector.x) * 0.1, 0.0, (rotationVector.z / angleToTheGround * speed - movementVector.z) * 0.1);
-        }
-
-        return movementVector;
-    }
+		return velocity.add(
+				rotation.x * 0.1 + (rotation.x * speedMultiplier - velocity.x) * 0.5,
+				rotation.y * 0.1 + (rotation.y * speedMultiplier - velocity.y) * 0.5,
+				rotation.z * 0.1 + (rotation.z * speedMultiplier - velocity.z) * 0.5);
+	}
 }

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "elytra_aeronautics_test",
+  "version": "1.0.0",
+  "name": "Elytra Aeronautics game tests",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-gametest": ["com.github.Soulphur0.test.ElytraAeronauticsTests"]
+  },
+  "depends": { "elytra_aeronautics": "*" }
+}
