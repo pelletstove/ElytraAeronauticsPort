@@ -119,4 +119,4 @@ Remember, this is using default settings, maximum flight speed can be increased 
 
 ## Minecraft 26.2 port
 
-Port to Minecraft 26.2 (Fabric, Java 25, Mojang mappings) on the `26.2` branch. Flight part only so far; cloud layers and chunk unloading are not ported. Covered by 8 GameTests. Licence CC BY-NC-SA 4.0: non-commercial, share-alike, credit Soulphur0 and KIRILLAND78.
+

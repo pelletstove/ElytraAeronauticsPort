@@ -3,7 +3,7 @@
 	"id": "elytra_aeronautics",
 	"version": "${version}",
 	"name": "Elytra aeronautics",
-	"description": "Fly faster with the elytra the higher you travel. 26.2 port of Soulphur's mod: flight only (altitude-based speed, firework boost, sneak to level out). Cloud layers and chunk unloading are not ported.",
+	"description": "Fly faster with the elytra the higher you travel. 26.2 port of Soulphur's mod: altitude-based speed, firework boost, sneak to level out, and the extra cloud layers from the old cloud_layers.json. Chunk unloading is not ported.",
 	"authors": ["Soulphur", "KIRILLAND78 (1.21.x port)"],
 	"contact": {
 		"homepage": "https://github.com/Soulphur0/ElytraAeronautics",
@@ -15,7 +15,10 @@
 		"main": ["com.github.Soulphur0.ElytraAeronautics"],
 		"client": ["com.github.Soulphur0.ElytraAeronauticsClient"]
 	},
-	"mixins": ["elytraaeronautics.mixins.json"],
+	"mixins": [
+		"elytraaeronautics.mixins.json",
+		{ "config": "elytraaeronautics.client.mixins.json", "environment": "client" }
+	],
 	"depends": {
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.2",
